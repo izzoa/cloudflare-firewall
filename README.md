@@ -152,6 +152,24 @@ After deployment, you can monitor blocked requests in the Cloudflare Zero Trust 
 
 ## Troubleshooting
 
+### Terraform state is locked
+
+If you cancel a pipeline during the deploy stage, Terraform's state lock may not be released. You'll see an error like:
+```
+Error acquiring the state lock
+```
+
+**Solution 1: GitLab UI (Recommended)**
+1. Go to **Infrastructure → Terraform States**
+2. Find the `production` state
+3. Click **Unlock**
+
+**Solution 2: Use the unlock job**
+1. Go to **CI/CD → Pipelines**
+2. Click on the latest pipeline
+3. Manually trigger the `unlock_terraform_state` job in the unlock stage
+4. Retry the deployment
+
 ### Pipeline fails at download stage
 - Check internet connectivity
 - Verify blocklist URLs are accessible

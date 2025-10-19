@@ -19,7 +19,7 @@ download_lists:
   artifacts:
     paths:
       - ${LISTS_DIR}/*.txt
-    expire_in: 1 hour
+    expire_in: 24 hours
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
     - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
@@ -38,7 +38,7 @@ process_lists:
   artifacts:
     paths:
       - ${OUTPUT_FILE}
-    expire_in: 1 hour
+    expire_in: 24 hours
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
     - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
@@ -82,7 +82,7 @@ deploy_to_cloudflare:
   artifacts:
     paths:
       - tfplan
-    expire_in: 1 week
+    expire_in: 24 hours
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
     - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'

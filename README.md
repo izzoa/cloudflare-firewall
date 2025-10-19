@@ -79,7 +79,7 @@ The pipeline uses GitLab's managed Terraform state. No additional configuration 
   - Mullvad Ad Blocking
   - Mullvad Privacy
 - Files are saved to the `lists/` directory
-- Artifacts expire after 1 hour
+- Artifacts expire after 24 hours
 
 ### Stage 2: Process
 - Merges all downloaded lists
@@ -87,7 +87,7 @@ The pipeline uses GitLab's managed Terraform state. No additional configuration 
 - Validates domains and IP addresses
 - Filters out comments and empty lines
 - Creates a single `output.txt` file
-- Artifacts expire after 1 hour
+- Artifacts expire after 24 hours
 
 ### Stage 3: Deploy
 - Initializes Terraform with GitLab backend

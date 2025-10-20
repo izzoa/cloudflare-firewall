@@ -1,0 +1,155 @@
+name: Cloudflare Firewall CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  schedule:
+    # Run on a schedule (e.g., daily at midnight UTC)
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Allow manual triggers
+
+env:
+  LISTS_DIR: lists
+  OUTPUT_FILE: output.txt
+  PYTHON_VERSION: '3.11'
+  TERRAFORM_VERSION: '1.6.0'
+
+jobs:
+  download_lists:
+    name: Download Blocklists
+    runs-on: ubuntu-latest
+    timeout-minutes: 720 # 12 hours
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Download blocklists
+        run: |
+          echo "Downloading blocklists..."
+          python helpers/downloader.py --output_dir ${{ env.LISTS_DIR }}
+      
+      - name: Upload blocklists as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: blocklists
+          path: ${{ env.LISTS_DIR }}/*.txt
+          retention-days: 1
+
+  process_lists:
+    name: Process and Deduplicate Lists
+    runs-on: ubuntu-latest
+    timeout-minutes: 720 # 12 hours
+    needs: download_lists
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Download blocklists artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: blocklists
+          path: ${{ env.LISTS_DIR }}
+      
+      - name: Process and deduplicate blocklists
+        run: |
+          echo "Processing and deduplicating blocklists..."
+          python helpers/processor.py ${{ env.LISTS_DIR }} --out ${{ env.OUTPUT_FILE }}
+          echo "Processed list contains $(wc -l < ${{ env.OUTPUT_FILE }}) domains"
+      
+      - name: Upload processed list as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: processed-list
+          path: ${{ env.OUTPUT_FILE }}
+          retention-days: 1
+
+  deploy_to_cloudflare:
+    name: Deploy to Cloudflare Zero Trust
+    runs-on: ubuntu-latest
+    timeout-minutes: 720 # 12 hours
+    needs: process_lists
+    # Only run on main/master branch pushes and scheduled runs (not on PRs)
+    if: github.event_name != 'pull_request'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download processed list artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: processed-list
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      
+      - name: Verify Terraform version
+        run: terraform --version
+      
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="address=${{ vars.TF_BACKEND_ADDRESS }}" \
+            -backend-config="lock_address=${{ vars.TF_BACKEND_LOCK_ADDRESS }}" \
+            -backend-config="unlock_address=${{ vars.TF_BACKEND_UNLOCK_ADDRESS }}" \
+            -backend-config="username=${{ vars.TF_BACKEND_USERNAME }}" \
+            -backend-config="password=${{ secrets.TF_BACKEND_PASSWORD }}" \
+            -backend-config="lock_method=POST" \
+            -backend-config="unlock_method=DELETE" \
+            -backend-config="retry_wait_min=5"
+      
+      - name: Terraform Validate
+        run: |
+          echo "Validating Terraform configuration..."
+          terraform validate
+      
+      - name: Terraform Destroy (if exists)
+        run: |
+          echo "Destroying existing DNS architecture (if any)..."
+          terraform destroy -auto-approve -lock=false \
+            -var="cf_api_key=${{ secrets.CF_API_TOKEN }}" \
+            -var="cf_acct_id=${{ secrets.CF_ACCOUNT_ID }}" \
+            -var="TF_ROOT=${{ github.workspace }}" || echo "No existing infrastructure to destroy"
+      
+      - name: Terraform Plan
+        run: |
+          echo "Planning new Terraform deployment..."
+          terraform plan -lock=false \
+            -var="cf_api_key=${{ secrets.CF_API_TOKEN }}" \
+            -var="cf_acct_id=${{ secrets.CF_ACCOUNT_ID }}" \
+            -var="TF_ROOT=${{ github.workspace }}" \
+            -out=tfplan
+      
+      - name: Terraform Apply
+        run: |
+          echo "Applying Terraform changes..."
+          terraform apply -auto-approve -lock=false tfplan
+      
+      - name: Upload Terraform plan
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: terraform-plan
+          path: tfplan
+          retention-days: 1
+

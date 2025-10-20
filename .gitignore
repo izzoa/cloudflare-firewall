@@ -24,3 +24,14 @@ __pycache__/
 *$py.class
 .venv/
 venv/
+
+# Terraform
+.terraform
+terraform.tfstate*
+*.tfvars
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfplan.*
+*.tfplan.lock.info
+*.terraform.lock.hcl

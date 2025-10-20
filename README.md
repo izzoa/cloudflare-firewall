@@ -96,21 +96,27 @@ terraform {
 
 > **Important:** The HTTP backend is uncommented by default (for CI/CD). You must manually comment it out before running `terraform init` locally.
 
-### Configure Entry Limits (Optional)
+### Configure Settings (Optional)
 
-Edit `settings.env` to control the maximum number of entries based on your Cloudflare account type:
+Edit `settings.env` to customize blocklist sources and processing limits:
 
 ```bash
 # settings.env
 FREE_ACCOUNT=false    # true = 1000 entries/list, false = 5000 entries/list
 MAX_LISTS=300         # Maximum number of lists to create
+BLOCKLISTS=https://codeberg.org/hagezi/mirror2/raw/branch/main/dns-blocklists/wildcard/pro-onlydomains.txt,https://raw.githubusercontent.com/mullvad/dns-blocklists/main/output/doh/doh_adblock.txt,https://raw.githubusercontent.com/mullvad/dns-blocklists/main/output/doh/doh_privacy.txt
 ```
+
+**What these settings do:**
+- `FREE_ACCOUNT`: Controls entries per list (1000 for free, 5000 for enterprise)
+- `MAX_LISTS`: Maximum number of Cloudflare lists to create
+- `BLOCKLISTS`: Comma-delimited URLs of blocklists to download
 
 **Capacity calculation:**
 - Free account: `1000 entries/list × 300 lists = 300,000 max entries`
 - Enterprise account: `5000 entries/list × 300 lists = 1,500,000 max entries`
 
-If `output.txt` contains more entries than the calculated limit, excess entries are automatically truncated during processing.
+Excess entries are automatically truncated during processing.
 
 ### Run Pipeline
 
@@ -458,53 +464,63 @@ gh workflow run deploy.yml
 
 ## Configuration
 
-### Entry Limits (`settings.env`)
+### Settings Configuration (`settings.env`)
 
-Control the maximum number of blocklist entries based on your Cloudflare account type:
+The `settings.env` file controls blocklist sources and processing limits:
 
 | Parameter | Description | Values |
 |-----------|-------------|--------|
 | `FREE_ACCOUNT` | Account type | `true` (1000 entries/list) or `false` (5000 entries/list) |
 | `MAX_LISTS` | Maximum number of lists | Numeric value (e.g., `300`) |
+| `BLOCKLISTS` | Blocklist URLs to download | Comma-delimited URLs |
 
-**Example configurations:**
+**Example configuration:**
 
 ```bash
-# Free Cloudflare account
-FREE_ACCOUNT=true
-MAX_LISTS=300
-# Capacity: 1000 × 300 = 300,000 max entries
-
-# Enterprise Cloudflare account
+# Account settings
 FREE_ACCOUNT=false
 MAX_LISTS=300
-# Capacity: 5000 × 300 = 1,500,000 max entries
+
+# Blocklist sources (comma-delimited URLs)
+BLOCKLISTS=https://codeberg.org/hagezi/mirror2/raw/branch/main/dns-blocklists/wildcard/pro-onlydomains.txt,https://raw.githubusercontent.com/mullvad/dns-blocklists/main/output/doh/doh_adblock.txt,https://raw.githubusercontent.com/mullvad/dns-blocklists/main/output/doh/doh_privacy.txt
 ```
 
-The processor automatically truncates entries beyond the calculated limit during processing. You'll see the entry count in the processor output:
+**Capacity calculation:**
+- Free account: `1000 entries/list × 300 lists = 300,000 max entries`
+- Enterprise account: `5000 entries/list × 300 lists = 1,500,000 max entries`
+
+**Blocklist URLs:**
+- Add or remove blocklist URLs by editing the comma-delimited `BLOCKLISTS` parameter
+- URLs must be publicly accessible
+- Filenames are automatically generated based on the domain and URL hash
+- If `BLOCKLISTS` is empty, the downloader falls back to default lists
+
+The processor automatically truncates entries beyond the calculated limit. You'll see the entry count in the output:
 ```
 Processing completed! Entries processed: 245832/1500000
 ```
 
 ### Customizing Blocklists
 
-Edit `helpers/downloader.py` to add/remove sources:
+**Recommended method:** Edit the `BLOCKLISTS` parameter in `settings.env`:
 
-```python
-files = [
-    ('https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/domains/multi-pro.txt', 'hagezi-multi-pro.txt'),
-    ('https://api.mullvad.net/app/v1/dnsname/adblock', 'mullvad-ad-blocking.txt'),
-    ('https://api.mullvad.net/app/v1/dnsname/privacy', 'mullvad-privacy.txt'),
-    # Add your custom sources here:
-    # ('https://example.com/blocklist.txt', 'custom-list.txt'),
-]
+```bash
+# Add or remove URLs (comma-delimited, no spaces between URLs)
+BLOCKLISTS=https://url1.com/list.txt,https://url2.com/list.txt,https://url3.com/list.txt
 ```
+
+**Alternative method:** Directly edit `helpers/downloader.py` if you need custom filename control. The downloader will use fallback lists if `BLOCKLISTS` is not defined in `settings.env`.
 
 **Popular blocklist sources:**
 - Hagezi: https://github.com/hagezi/dns-blocklists
+  - Example: `https://codeberg.org/hagezi/mirror2/raw/branch/main/dns-blocklists/wildcard/pro-onlydomains.txt`
 - OISD: https://oisd.nl/
+  - Example: `https://big.oisd.nl/domainswild`
 - StevenBlack: https://github.com/StevenBlack/hosts
+  - Example: `https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts`
 - Mullvad: https://mullvad.net/
+  - Ad blocking: `https://raw.githubusercontent.com/mullvad/dns-blocklists/main/output/doh/doh_adblock.txt`
+  - Privacy: `https://raw.githubusercontent.com/mullvad/dns-blocklists/main/output/doh/doh_privacy.txt`
 
 ---
 
@@ -906,8 +922,8 @@ A: No, this only manages Zero Trust Gateway blocklists, not your DNS records.
 **Q: What happens if a pipeline fails?**  
 A: No changes are applied to Cloudflare. Fix the issue and re-run. Previous deployment remains active.
 
-**Q: Can I use custom blocklists?**  
-A: Yes! Edit `helpers/downloader.py` to add any publicly accessible blocklist URL.
+**Q: Can I use custom blocklists?**
+A: Yes! Edit the `BLOCKLISTS` parameter in `settings.env` with comma-delimited URLs, or directly edit `helpers/downloader.py` for more control.
 
 **Q: How do I temporarily disable blocking?**  
 A: In Cloudflare Dashboard, go to **Zero Trust → Gateway → Firewall Policies** and disable the rule.

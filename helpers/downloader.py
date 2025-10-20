@@ -3,9 +3,35 @@ import urllib.request
 import logging
 import argparse
 import binascii
+from pathlib import Path
+import hashlib
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
+
+def load_settings():
+    settings_path = Path(__file__).parent.parent / 'settings.env'
+    settings = {}
+    if settings_path.exists():
+        with open(settings_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    settings[key.strip()] = value.strip()
+    return settings
+
+def generate_filename(url):
+    url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+    domain_part = url.split('//')[-1].split('/')[0].replace('.', '_')
+    return f"{domain_part}_{url_hash}.txt"
+
+def parse_blocklists(settings):
+    blocklists_str = settings.get('BLOCKLISTS', '')
+    if not blocklists_str:
+        return []
+    urls = [url.strip() for url in blocklists_str.split(',') if url.strip()]
+    return [(url, generate_filename(url)) for url in urls]
 
 # Parse command line arguments
 parser = argparse.ArgumentParser()
@@ -16,14 +42,17 @@ args = parser.parse_args()
 # Create the directory if it doesn't exist
 os.makedirs(args.output_dir, exist_ok=True)
 
-# List of files to download
-files = [
-    # ('https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.mini-onlydomains.txt', 'hagezi_promini.txt'),
-    ('https://codeberg.org/hagezi/mirror2/raw/branch/main/dns-blocklists/wildcard/pro-onlydomains.txt', 'hagezi_multipro.txt'),
-    # ('https://raw.githubusercontent.com/badmojr/1Hosts/master/Lite/domains.txt', '1hosts_lite.txt'),
-    ('https://raw.githubusercontent.com/mullvad/dns-blocklists/main/output/doh/doh_adblock.txt', 'mullvad_adblock.txt'),
-    ('https://raw.githubusercontent.com/mullvad/dns-blocklists/main/output/doh/doh_privacy.txt', 'mullvad_privacy.txt'),
-]
+# Load blocklists from settings.env
+settings = load_settings()
+files = parse_blocklists(settings)
+
+if not files:
+    logging.warning("No blocklists found in settings.env. Using default fallback lists.")
+    files = [
+        ('https://codeberg.org/hagezi/mirror2/raw/branch/main/dns-blocklists/wildcard/pro-onlydomains.txt', 'hagezi_multipro.txt'),
+        ('https://raw.githubusercontent.com/mullvad/dns-blocklists/main/output/doh/doh_adblock.txt', 'mullvad_adblock.txt'),
+        ('https://raw.githubusercontent.com/mullvad/dns-blocklists/main/output/doh/doh_privacy.txt', 'mullvad_privacy.txt'),
+    ]
 
 # Download and rename files
 for url, filename in files:

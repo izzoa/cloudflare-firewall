@@ -8,11 +8,13 @@ Automatically download, process, and deploy DNS blocklists to Cloudflare Zero Tr
 
 Choose your deployment method:
 
-| Method | Setup Time | Best For | State Management |
-|--------|------------|----------|------------------|
-| **[Local](#local-deployment)** | 5 min | Testing, one-time runs | Local files |
-| **[GitLab CI/CD](#gitlab-cicd-deployment)** | 10 min | GitLab users, automated updates | Built-in HTTP backend |
-| **[GitHub Actions](#github-actions-deployment)** | 15 min | GitHub users, automated updates | Terraform Cloud (free) |
+| Method | Setup Time | Best For | State Management | Recommended |
+|--------|------------|----------|------------------|-------------|
+| **[GitLab CI/CD](#gitlab-cicd-deployment)** ⭐ | 10 min | Automated updates, easiest setup | Built-in (free) | ✅ **Yes** |
+| **[GitHub Actions](#github-actions-deployment)** | 15 min | GitHub users | External required | For GitHub users |
+| **[Local](#local-deployment)** | 5 min | Testing, one-time runs | Local files | For testing only |
+
+> **💡 Recommendation:** We strongly recommend **GitLab CI/CD** as it provides built-in Terraform state management, making setup significantly easier than other platforms. Even if you prefer GitHub, you can still use GitLab's free backend!
 
 ## Overview
 
@@ -59,194 +61,247 @@ This tool performs three main tasks:
 
 ---
 
-## Local Deployment
+## GitLab CI/CD Deployment ⭐ **Recommended**
 
-Perfect for testing, one-time runs, or manual control.
+**Why GitLab?** GitLab provides built-in Terraform state management (free!), making it the easiest platform for automated deployments. You don't need any external services or complicated backend configurations.
 
-### Setup
+### What You'll Need
 
-```bash
-# 1. Clone the repository
-git clone <repository-url>
-cd cloudflare-firewall
+Before starting, make sure you have:
+- ✅ A Cloudflare account with Zero Trust enabled ([sign up free](https://dash.cloudflare.com/sign-up))
+- ✅ A GitLab account ([sign up free](https://gitlab.com/users/sign_up))
+- ✅ 10 minutes to complete setup
 
-# 2. Install Python dependencies (if needed)
-pip install -r requirements.txt  # Create if your scripts need external packages
+That's it! No credit card, no external services, no complex configuration.
 
-# 3. Set environment variables
-export CF_API_TOKEN="your_cloudflare_api_token"
-export CF_ACCOUNT_ID="your_cloudflare_account_id"
-```
+#### 1️⃣ Get Your Cloudflare Credentials
 
-### Configure Backend for Local Use
+First, you need two pieces of information from Cloudflare:
 
-By default, `main.tf` is configured with an HTTP backend for CI/CD pipelines. **For local development, you must comment out the HTTP backend** to use local state files:
+**A. Get your API Token:**
+1. Log in to [Cloudflare Dashboard](https://dash.cloudflare.com/)
+2. Click your profile icon (top right) → **My Profile**
+3. Go to **API Tokens** tab on the left
+4. Click **Create Token** button
+5. Find **"Edit Cloudflare Zero Trust"** template and click **Use template**
+6. Scroll down and click **Continue to summary**
+7. Click **Create Token**
+8. **Important:** Copy this token now! You won't see it again
+   - Save it somewhere safe (like a password manager)
 
-**Edit `main.tf` and comment out the HTTP backend:**
-```terraform
-terraform {
-  # Comment this out for local development:
-  # backend "http" {}
-  
-  required_providers {
-    ...
-  }
-}
-```
+**B. Get your Account ID:**
+1. Go back to [Cloudflare Dashboard](https://dash.cloudflare.com/)
+2. Click on your account name
+3. On the right side, you'll see **Account ID**
+4. Click the copy icon to copy it
 
-> **Important:** The HTTP backend is uncommented by default (for CI/CD). You must manually comment it out before running `terraform init` locally.
-
-### Configure Settings (Optional)
-
-Edit `settings.env` to customize blocklist sources and processing limits:
-
-```bash
-# settings.env
-FREE_ACCOUNT=false    # true = 1000 entries/list, false = 5000 entries/list
-MAX_LISTS=300         # Maximum number of lists to create
-BLOCKLISTS=https://codeberg.org/hagezi/mirror2/raw/branch/main/dns-blocklists/wildcard/pro-onlydomains.txt,https://raw.githubusercontent.com/mullvad/dns-blocklists/main/output/doh/doh_adblock.txt,https://raw.githubusercontent.com/mullvad/dns-blocklists/main/output/doh/doh_privacy.txt
-```
-
-**What these settings do:**
-- `FREE_ACCOUNT`: Controls entries per list (1000 for free, 5000 for enterprise)
-- `MAX_LISTS`: Maximum number of Cloudflare lists to create
-- `BLOCKLISTS`: Comma-delimited URLs of blocklists to download
-
-**Capacity calculation:**
-- Free account: `1000 entries/list × 300 lists = 300,000 max entries`
-- Enterprise account: `5000 entries/list × 300 lists = 1,500,000 max entries`
-
-Excess entries are automatically truncated during processing.
-
-### Run Pipeline
-
-```bash
-# Step 1: Download blocklists
-python helpers/downloader.py --output_dir lists
-
-# Step 2: Process and deduplicate
-python helpers/processor.py lists --out output.txt
-
-# Step 3: Deploy with Terraform
-terraform init
-terraform plan \
-  -var="cf_api_key=$CF_API_TOKEN" \
-  -var="cf_acct_id=$CF_ACCOUNT_ID" \
-  -var="TF_ROOT=$(pwd)"
-terraform apply -auto-approve
-
-# Check results
-echo "Deployed $(wc -l < output.txt) domains to Cloudflare"
-```
-
-### Scheduling Local Runs
-
-Use cron for automatic updates:
-
-```bash
-# Edit crontab
-crontab -e
-
-# Add entry (runs daily at 2 AM)
-0 2 * * * cd /path/to/cloudflare-firewall && ./run.sh >> /var/log/blocklist-update.log 2>&1
-```
-
-Create `run.sh`:
-```bash
-#!/bin/bash
-export CF_API_TOKEN="your_token"
-export CF_ACCOUNT_ID="your_account_id"
-
-python helpers/downloader.py --output_dir lists
-python helpers/processor.py lists --out output.txt
-terraform apply -auto-approve \
-  -var="cf_api_key=$CF_API_TOKEN" \
-  -var="cf_acct_id=$CF_ACCOUNT_ID" \
-  -var="TF_ROOT=$(pwd)"
-```
+✅ You now have: `CF_API_TOKEN` and `CF_ACCOUNT_ID`
 
 ---
 
-## GitLab CI/CD Deployment
+#### 2️⃣ Create a GitLab Repository
 
-Automated pipeline with built-in state management using GitLab's HTTP backend.
+**Option A: Use this template (Easiest)**
+1. Click the **"Use this template"** button at the top of this GitHub page
+2. Choose "Create a new repository"
+3. Name it whatever you want (e.g., `my-blocklist-manager`)
+4. Make it Private (recommended) or Public
+5. Click **Create repository**
 
-### Setup
-
-#### 1. Push Code to GitLab
+**Option B: Push to GitLab manually:**
+1. Go to [GitLab.com](https://gitlab.com/) and sign in
+2. Click **New project** (top right green button)
+3. Click **Create blank project**
+4. Fill in:
+   - **Project name:** `cloudflare-firewall` (or anything you want)
+   - **Visibility Level:** Private (recommended)
+5. Click **Create project**
+6. On your computer, clone this repository and push to GitLab:
 
 ```bash
-git remote add gitlab https://gitlab.com/username/cloudflare-firewall.git
+# Clone this repository
+git clone https://github.com/YOUR-USERNAME/cloudflare-firewall.git
+cd cloudflare-firewall
+
+# Add GitLab as a remote
+git remote add gitlab https://gitlab.com/YOUR-GITLAB-USERNAME/cloudflare-firewall.git
+
+# Push to GitLab
 git push gitlab main
 ```
 
-#### 2. Configure CI/CD Variables
+✅ Your code is now on GitLab!
 
-Go to **Settings → CI/CD → Variables** and add:
+---
 
-| Variable | Value | Protected | Masked |
-|----------|-------|-----------|--------|
-| `CF_API_TOKEN` | Your Cloudflare API token | ✅ Yes | ✅ Yes |
-| `CF_ACCOUNT_ID` | Your Cloudflare account ID | ✅ Yes | ❌ No |
+#### 3️⃣ Add Your Cloudflare Credentials to GitLab
 
-#### 3. Configure Schedule (Optional)
+Now we'll securely store your Cloudflare credentials in GitLab:
 
-To run automatically:
+1. In your GitLab project, click **Settings** (left sidebar, near bottom)
+2. Click **CI/CD**
+3. Find the **Variables** section and click **Expand**
+4. Click **Add variable** button
 
-1. Go to **CI/CD → Schedules**
-2. Click **New schedule**
-3. Configure:
-   - **Description**: "Daily blocklist update"
-   - **Interval Pattern**: Cron expression (see examples below)
-   - **Target Branch**: `main`
-   - **Activated**: ✅ Check
-4. Save
+**Add your first variable (API Token):**
+- **Key:** `CF_API_TOKEN`
+- **Value:** Paste your Cloudflare API token (from step 1)
+- **Type:** Variable
+- **Environment scope:** All (default)
+- **Flags:**
+  - ✅ Check **Protect variable**
+  - ✅ Check **Mask variable** (this hides it in logs)
+  - ❌ Leave **Expand variable reference** unchecked
+- Click **Add variable**
 
-**Cron Examples:**
-- `0 2 * * *` - Daily at 2:00 AM UTC
-- `0 */6 * * *` - Every 6 hours
-- `0 0 * * 0` - Weekly on Sunday at midnight
-- `0 3 * * 1,4` - Monday and Thursday at 3:00 AM UTC
+**Add your second variable (Account ID):**
+- Click **Add variable** again
+- **Key:** `CF_ACCOUNT_ID`
+- **Value:** Paste your Cloudflare Account ID (from step 1)
+- **Type:** Variable
+- **Flags:**
+  - ✅ Check **Protect variable**
+  - ❌ Leave **Mask variable** unchecked (Account IDs are not sensitive)
+- Click **Add variable**
 
-### Pipeline Configuration
+✅ Your credentials are now securely stored!
 
-The pipeline is defined in `.gitlab-ci.yml`:
+---
 
-**Stages:**
+#### 4️⃣ (Optional) Set Up Automatic Daily Updates
+
+Want your blocklists to update automatically every day? Here's how:
+
+1. In your GitLab project, go to **CI/CD** → **Schedules** (left sidebar)
+2. Click **New schedule** button
+3. Fill in the form:
+   - **Description:** `Daily blocklist update` (or anything you want)
+   - **Interval Pattern:** Use one of these:
+     - `0 2 * * *` - Every day at 2:00 AM UTC (recommended)
+     - `0 */6 * * *` - Every 6 hours
+     - `0 0 * * 0` - Weekly on Sunday at midnight
+     - `0 3 * * 1,4` - Monday and Thursday at 3:00 AM
+   - **Cron timezone:** UTC (or your timezone)
+   - **Target Branch:** `main`
+   - **Activated:** ✅ Check this box
+4. Click **Save pipeline schedule**
+
+✅ Your blocklists will now update automatically!
+
+> **💡 Tip:** You can use [crontab.guru](https://crontab.guru/) to create custom schedules
+
+---
+
+#### 5️⃣ Run Your First Pipeline!
+
+Your setup is complete! Now let's test it:
+
+1. Go to **CI/CD** → **Pipelines** (left sidebar)
+2. Click **Run pipeline** button
+3. Make sure **Branch** is set to `main`
+4. Click **Run pipeline**
+
+**What happens next:**
+1. ⬇️ **Download** - Fetches blocklists from configured sources (~30 seconds)
+2. ⚙️ **Process** - Removes duplicates and validates domains (~1-2 minutes)
+3. 🚀 **Deploy** - Uploads to Cloudflare Zero Trust (~2-5 minutes)
+
+**Total time:** Usually 3-7 minutes
+
+**To watch progress:**
+- Click on the pipeline (it will show as "running")
+- Click on each job (download → process → deploy) to see live logs
+- When it turns green ✅, you're done!
+
+---
+
+#### 6️⃣ Verify It's Working
+
+After the pipeline completes successfully:
+
+1. Go to [Cloudflare Dashboard](https://dash.cloudflare.com/)
+2. Navigate to **Zero Trust** → **Gateway** → **Firewall Policies**
+3. You should see a rule called **"DNS Block Protection"**
+4. Check **Lists** to see your domain lists (named `master_domain_list_0`, `master_domain_list_1`, etc.)
+
+🎉 **Congratulations!** Your DNS blocklist is now active and will update automatically!
+
+---
+
+### What Happens During Each Run
+
+Every time the pipeline runs (manually or on schedule):
+
+1. **Destroys old lists** - Removes previous blocklists from Cloudflare
+2. **Downloads fresh blocklists** - Gets latest lists from sources in `settings.env`
+3. **Processes entries** - Removes duplicates, validates domains
+4. **Chunks into lists** - Splits into Cloudflare-compatible list sizes
+5. **Deploys to Cloudflare** - Creates new lists and blocking rules
+6. **Enforces limits** - Respects your `FREE_ACCOUNT` and `MAX_LISTS` settings
+
+### Customizing Your Configuration
+
+Want to change blocklists or limits? Edit `settings.env` in your GitLab repository:
+
+```bash
+# Account settings
+FREE_ACCOUNT=false    # true = 1000 entries/list, false = 5000 entries/list
+MAX_LISTS=300         # Maximum number of lists to create
+
+# Blocklist sources (comma-delimited URLs)
+BLOCKLISTS=https://your-blocklist-url-1.com/list.txt,https://your-blocklist-url-2.com/list.txt
+```
+
+After saving changes, commit and push to GitLab - the pipeline will run automatically!
+
+---
+
+### Technical Details (For Advanced Users)
+
+**Pipeline Configuration:**
+The pipeline is defined in `.gitlab-ci.yml` with three stages:
 1. **download** - Fetches blocklists (Python 3.11-slim container)
 2. **process** - Deduplicates and validates (Python 3.11-slim container)
 3. **deploy** - Applies to Cloudflare (Terraform 1.6.0 container)
 
-**Triggers:**
-- Scheduled runs (if configured)
-- Push to `main` or `master` branch
-- Merge requests (download + process only, no deploy)
+**Automatic Triggers:**
+- ✅ Push to `main` or `master` branch
+- ✅ Scheduled runs (if configured)
+- ✅ Manual pipeline runs
+- ⚠️ Merge requests run download + process only (no deploy)
 
-**State Management:**
-- Uses GitLab's built-in HTTP Terraform backend
+**State Management (The Magic ✨):**
+- Uses GitLab's built-in HTTP backend for Terraform state
 - State stored at: `/projects/{PROJECT_ID}/terraform/state/production`
 - Automatic authentication via `CI_JOB_TOKEN`
-- No additional backend configuration needed
+- **No additional configuration needed** - it just works!
 
-**Timeouts:**
-- All jobs: 12 hours (configurable in `.gitlab-ci.yml`)
-
-### Monitoring
-
-View pipeline status:
-- **CI/CD → Pipelines** - See all pipeline runs
-- **CI/CD → Jobs** - View individual job logs
-
-After deployment, monitor blocked requests:
-- **Cloudflare Dashboard → Analytics → Gateway**
+**Monitoring Your Blocklists:**
+- View pipeline runs: **CI/CD → Pipelines**
+- Check job logs: Click any pipeline → Click any job
+- Monitor blocked requests: **Cloudflare Dashboard → Zero Trust → Analytics → Gateway**
 
 ---
 
 ## GitHub Actions Deployment
 
-Automated workflow with flexible backend options for GitHub repositories.
+**For GitHub Users Only** - If you prefer GitHub over GitLab, you can use GitHub Actions for automation.
 
-> **💡 Recommended Backend:** Use [Terraform Cloud's free tier](https://app.terraform.io/) for state management. Unlike GitLab, GitHub Actions doesn't have a built-in Terraform backend, but Terraform Cloud provides a purpose-built, free solution that's easy to set up.
+> **⚠️ Important:** GitHub Actions does NOT have built-in Terraform state management like GitLab. You'll need to set up an external backend (Terraform Cloud recommended, or use GitLab's backend from GitHub).
+
+### Why This Is More Complex Than GitLab
+
+GitLab includes free Terraform state storage built-in. GitHub doesn't, so you have two options:
+
+**Option A (Recommended):** Use Terraform Cloud (free tier)
+- ✅ Purpose-built for Terraform
+- ✅ Free tier available
+- ⚠️ Requires creating another account
+
+**Option B:** Use GitLab's backend from GitHub Actions
+- ✅ Completely free
+- ✅ Works across platforms
+- ⚠️ Requires a GitLab account anyway (so why not just use GitLab CI/CD?)
 
 ### Setup
 
@@ -410,46 +465,134 @@ gh workflow run deploy.yml
 
 ---
 
+## Local Deployment
+
+**For Testing Only** - Run the pipeline manually on your computer.
+
+> **⚠️ Not Recommended for Production:** Local deployment doesn't provide automation, scheduling, or state backup. Use this only for testing or one-time deployments.
+
+### What You'll Need
+
+- Python 3.11 or higher
+- Terraform 1.6.0 or higher
+- Your Cloudflare credentials
+
+### Quick Setup
+
+**1. Install Dependencies:**
+
+```bash
+# macOS
+brew install python@3.11 terraform
+
+# Ubuntu/Debian
+sudo apt install python3.11 terraform
+
+# Windows
+# Download from python.org and terraform.io
+```
+
+**2. Clone and Configure:**
+
+```bash
+# Clone the repository
+git clone https://github.com/YOUR-USERNAME/cloudflare-firewall.git
+cd cloudflare-firewall
+
+# Set your Cloudflare credentials
+export CF_API_TOKEN="your_cloudflare_api_token"
+export CF_ACCOUNT_ID="your_cloudflare_account_id"
+
+# IMPORTANT: Comment out the HTTP backend in main.tf
+# Edit main.tf and change line 2 to:
+# # backend "http" {}
+```
+
+**3. Configure Settings (Optional):**
+
+Edit `settings.env` to customize your blocklists and limits (see [Configuration](#configuration) section below).
+
+**4. Run the Pipeline:**
+
+```bash
+# Step 1: Download blocklists
+python helpers/downloader.py --output_dir lists
+
+# Step 2: Process and deduplicate
+python helpers/processor.py lists --out output.txt
+
+# Step 3: Deploy to Cloudflare
+terraform init
+terraform apply -auto-approve \
+  -var="cf_api_key=$CF_API_TOKEN" \
+  -var="cf_acct_id=$CF_ACCOUNT_ID" \
+  -var="TF_ROOT=$(pwd)"
+
+# Check results
+echo "Deployed $(wc -l < output.txt) domains to Cloudflare"
+```
+
+### Scheduling with Cron (Optional)
+
+To run automatically on a schedule:
+
+```bash
+# Create a run script
+cat > run.sh << 'EOF'
+#!/bin/bash
+export CF_API_TOKEN="your_token"
+export CF_ACCOUNT_ID="your_account"
+
+cd /path/to/cloudflare-firewall
+python helpers/downloader.py --output_dir lists
+python helpers/processor.py lists --out output.txt
+terraform apply -auto-approve \
+  -var="cf_api_key=$CF_API_TOKEN" \
+  -var="cf_acct_id=$CF_ACCOUNT_ID" \
+  -var="TF_ROOT=$(pwd)"
+EOF
+
+chmod +x run.sh
+
+# Add to crontab (runs daily at 2 AM)
+(crontab -l 2>/dev/null; echo "0 2 * * * /path/to/cloudflare-firewall/run.sh >> /var/log/blocklist.log 2>&1") | crontab -
+```
+
+---
+
 ## Platform Comparison
 
-### Features
+### Quick Comparison
 
-| Feature | Local | GitLab CI/CD | GitHub Actions |
-|---------|-------|--------------|----------------|
-| **Setup Complexity** | Low | Medium | Medium-High |
-| **Automation** | Manual/Cron | ✅ Built-in | ✅ Built-in |
-| **Terraform State Backend** | Local files | ✅ Built-in HTTP API | ❌ None (external required) |
-| **State Management** | Local files | Native GitLab backend | Terraform Cloud/GitLab/S3 |
-| **State Locking** | ❌ No | ✅ Yes | ✅ Yes (with backend) |
-| **Team Collaboration** | ❌ No | ✅ Yes | ✅ Yes (with backend) |
-| **Scheduled Runs** | Cron | ✅ Built-in scheduler | ✅ Built-in scheduler |
-| **Logs/Artifacts** | Local files | 24-hour retention | 1-day retention (configurable) |
-| **Cost** | Free (your compute) | Free tier available | Free (TF Cloud free tier) |
-| **Internet Required** | ✅ Yes | ✅ Yes | ✅ Yes |
+| Feature | GitLab CI/CD ⭐ | GitHub Actions | Local |
+|---------|----------------|----------------|-------|
+| **Setup Difficulty** | 🟢 Easy | 🟡 Medium | 🟢 Easy (but manual) |
+| **State Management** | ✅ Built-in (free!) | ❌ External required | ❌ Local files only |
+| **Automation** | ✅ Built-in | ✅ Built-in | ❌ Manual/Cron |
+| **Scheduled Updates** | ✅ Built-in scheduler | ✅ Built-in scheduler | ⚠️ Cron only |
+| **Team Collaboration** | ✅ Yes | ✅ Yes | ❌ No |
+| **State Locking** | ✅ Yes | ✅ Yes (with backend) | ❌ No |
+| **Zero Cost** | ✅ 100% Free | ⚠️ Requires TF Cloud | ✅ Free (your compute) |
+| **Best For** | **Everyone!** | GitHub-only users | Testing only |
 
-### When to Use Each
+### Recommendation by Use Case
 
-**Use Local when:**
-- ✅ Testing the setup
-- ✅ One-time deployment
-- ✅ You have a dedicated machine for automation
-- ✅ Learning how the tool works
-- ✅ No need for team collaboration
+**🎯 For Production Use (Recommended):**
+- **Use GitLab CI/CD** - Easiest setup, built-in state management, completely free
 
-**Use GitLab CI/CD when:**
-- ✅ Your code is already on GitLab
-- ✅ You want automated updates
-- ✅ You need team collaboration
-- ✅ You want built-in state management
-- ✅ You prefer GitLab's interface
+**⚙️ If You Must Use GitHub:**
+- **Use GitHub Actions** - But you'll need Terraform Cloud (free tier) or GitLab's backend
 
-**Use GitHub Actions when:**
-- ✅ Your code is already on GitHub
-- ✅ You want automated updates
-- ✅ You need team collaboration
-- ✅ You can use Terraform Cloud (recommended) or other external backend
-- ✅ You prefer GitHub's interface
-- ⚠️ Note: Requires external backend for production (Terraform Cloud free tier recommended)
+**🧪 For Testing/Development:**
+- **Use Local** - Quick testing, but not suitable for ongoing automated updates
+
+### Why We Recommend GitLab
+
+1. **Zero External Dependencies** - Everything you need is built-in
+2. **Completely Free** - No external accounts or services required
+3. **Easier Setup** - No backend configuration needed
+4. **Better for Beginners** - Fewer moving parts to understand
+5. **Works from Anywhere** - GitHub, GitLab, or any Git platform can use GitLab's backend
 
 ### Variable/Secret Mapping
 

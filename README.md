@@ -25,6 +25,7 @@ This tool performs three main tasks:
 **Features:**
 - ✅ Automatic deduplication and validation
 - ✅ Chunks large lists (1000 domains per Cloudflare list)
+- ✅ Configurable entry limits based on account type
 - ✅ Scheduled automatic updates (CI/CD)
 - ✅ Clean state on each deployment (destroy & recreate)
 - ✅ Support for multiple blocklist sources
@@ -94,6 +95,22 @@ terraform {
 ```
 
 > **Important:** The HTTP backend is uncommented by default (for CI/CD). You must manually comment it out before running `terraform init` locally.
+
+### Configure Entry Limits (Optional)
+
+Edit `settings.env` to control the maximum number of entries based on your Cloudflare account type:
+
+```bash
+# settings.env
+FREE_ACCOUNT=false    # true = 1000 entries/list, false = 5000 entries/list
+MAX_LISTS=300         # Maximum number of lists to create
+```
+
+**Capacity calculation:**
+- Free account: `1000 entries/list × 300 lists = 300,000 max entries`
+- Enterprise account: `5000 entries/list × 300 lists = 1,500,000 max entries`
+
+If `output.txt` contains more entries than the calculated limit, excess entries are automatically truncated during processing.
 
 ### Run Pipeline
 
@@ -439,7 +456,37 @@ gh workflow run deploy.yml
 
 ---
 
-## Customizing Blocklists
+## Configuration
+
+### Entry Limits (`settings.env`)
+
+Control the maximum number of blocklist entries based on your Cloudflare account type:
+
+| Parameter | Description | Values |
+|-----------|-------------|--------|
+| `FREE_ACCOUNT` | Account type | `true` (1000 entries/list) or `false` (5000 entries/list) |
+| `MAX_LISTS` | Maximum number of lists | Numeric value (e.g., `300`) |
+
+**Example configurations:**
+
+```bash
+# Free Cloudflare account
+FREE_ACCOUNT=true
+MAX_LISTS=300
+# Capacity: 1000 × 300 = 300,000 max entries
+
+# Enterprise Cloudflare account
+FREE_ACCOUNT=false
+MAX_LISTS=300
+# Capacity: 5000 × 300 = 1,500,000 max entries
+```
+
+The processor automatically truncates entries beyond the calculated limit during processing. You'll see the entry count in the processor output:
+```
+Processing completed! Entries processed: 245832/1500000
+```
+
+### Customizing Blocklists
 
 Edit `helpers/downloader.py` to add/remove sources:
 
@@ -931,6 +978,7 @@ cloudflare-firewall/
 ├── main.tf                 # Terraform main configuration
 ├── parse.tf                # Terraform parsing logic
 ├── upload.tf               # Terraform upload configuration
+├── settings.env            # Entry limits configuration
 ├── output.txt              # Processed output (generated)
 └── README.md               # This file
 ```
